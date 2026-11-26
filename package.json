@@ -2,9 +2,9 @@
   "name": "wa-multi-session-admin",
   "version": "1.0.0",
   "description": "WhatsApp QR & Pairing Code server with Admin-only session control",
-  "main": "server.js",
+  "main": "index.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node index.js"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "6.6.0",
