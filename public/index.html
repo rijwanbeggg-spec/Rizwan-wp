@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WhatsApp Connect & Admin Server Dashboard</title>
+  <style>
+    * { box-sizing: border-box; font-family: system-ui, -apple-system, sans-serif; }
+    body { margin: 0; background: #0f172a; color: #e2e8f0; padding: 20px; }
+    .container { max-width: 960px; margin: 0 auto; display: grid; gap: 20px; }
+    .card { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 20px; }
+    h1, h2 { margin-top: 0; color: #f8fafc; }
+    .row { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; }
+    input, select {
+      background: #0f172a; color: #f8fafc; border: 1px solid #475569;
+      border-radius: 8px; padding: 10px 12px; font-size: 14px; flex: 1; min-width: 180px;
+    }
+    button {
+      background: #16a34a; color: #fff; border: none; border-radius: 8px;
+      padding: 10px 16px; font-weight: 600; cursor: pointer; font-size: 14px;
+    }
+    button:hover { background: #15803d; }
+    button.secondary { background: #2563eb; }
+    button.secondary:hover { background: #1d4ed8; }
+    button.danger { background: #dc2626; }
+    button.danger:hover { background: #b91c1c; }
+    .connect-output {
+      margin-top: 16px; padding: 14px; border-radius: 10px;
+      background: #0f172a; border: 1px dashed #475569; text-align: center;
+    }
+    .connect-output img { max-width: 240px; border-radius: 8px; background: #fff; padding: 8px; }
+    .code-box {
+      font-size: 24px; font-weight: 700; letter-spacing: 4px;
+      color: #4ade80; margin: 10px 0;
+    }
+    .badge {
+      display: inline-block; padding: 4px 10px; border-radius: 999px;
+      font-size: 12px; font-weight: 600; background: #334155; color: #f8fafc;
+    }
+    .badge.connected { background: #14532d; color: #86efac; }
+    .badge.qr_ready, .badge.pairing_code_ready, .badge.starting { background: #713f12; color: #fde047; }
+    table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 14px; }
+    th, td { padding: 10px; border-bottom: 1px solid #334155; text-align: left; }
+    .muted { color: #94a3b8; font-size: 13px; }
+    .hidden { display: none; }
+    .err { color: #f87171; font-size: 13px; margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- 1. USER CONNECT SECTION (QR + NUMBER) -->
+    <div class="card">
+      <h1>WhatsApp Session Connect</h1>
+      <p class="muted">QR Scanner ya WhatsApp Number (Country code ke saath, jaise 919876543210) se connect karein.</p>
+
+      <div class="row">
+        <input id="ownerLabel" type="text" placeholder="Aapka naam / Bot label (optional)" />
+        <input id="phoneInput" type="text" placeholder="WhatsApp Number (e.g. 919876543210)" />
+        <select id="connectMode">
+          <option value="qr">QR Scanner</option>
+          <option value="code">WhatsApp Number (Pairing Code)</option>
+        </select>
+        <button id="connectBtn">Connect Karein</button>
+      </div>
+
+      <div id="userStatusBox" class="connect-output hidden">
+        <div>Session ID: <strong id="activeSessionId">-</strong> | Status: <span id="activeStatusBadge" class="badge">-</span></div>
+        <div id="qrContainer" class="hidden" style="margin-top:12px;">
+          <img id="qrImg" alt="WhatsApp QR Code" />
+        </div>
+        <div id="codeContainer" class="hidden">
+          <div class="muted">WhatsApp -> Linked Devices -> Link with phone number me yeh code daalein:</div>
+          <div id="pairingCodeText" class="code-box"></div>
+        </div>
+        <div id="userErrorText" class="err"></div>
+      </div>
+    </div>
+
+    <!-- 2. ADMIN ONLY DASHBOARD -->
+    <div class="card">
+      <h2>Admin Server Control (Sirf Admin Ke Liye)</h2>
+      <p class="muted">Sirf sahi Admin Key daalne par hi chalte hue servers/sessions dikhenge aur Stop button kaam karega.</p>
+
+      <div class="row">
+        <input id="adminKeyInput" type="password" placeholder="Admin Secret Key daalein" />
+        <button id="adminLoginBtn" class="secondary">Admin Login & Refresh</button>
+      </div>
+      <div id="adminLoginError" class="err"></div>
+
+      <div id="adminPanel" class="hidden">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:12px;">
+          <div><strong>Active Sessions:</strong> <span id="totalRunningCount">0</span></div>
+          <button id="refreshAdminBtn" class="secondary">List Refresh Karein</button>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th>User / Label</th>
+              <th>Number</th>
+              <th>Session ID</th>
+              <th>Status</th>
+              <th>Started At</th>
+              <th>Admin Action</th>
+            </tr>
+          </thead>
+          <tbody id="adminSessionsBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let pollTimer = null;
+    let adminPollTimer = null;
+    let savedAdminKey = '';
+
+    const connectBtn = document.getElementById('connectBtn');
+    const userStatusBox = document.getElementById('userStatusBox');
+    const activeSessionIdEl = document.getElementById('activeSessionId');
+    const activeStatusBadgeEl = document.getElementById('activeStatusBadge');
+    const qrContainer = document.getElementById('qrContainer');
+    const qrImg = document.getElementById('qrImg');
+    const codeContainer = document.getElementById('codeContainer');
+    const pairingCodeText = document.getElementById('pairingCodeText');
+    const userErrorText = document.getElementById('userErrorText');
+
+    function setBadge(el, status) {
+      el.className = 'badge ' + (status || '');
+      el.textContent = status || 'unknown';
+    }
+
+    async function pollSessionStatus(sessionId) {
+      if (pollTimer) clearInterval(pollTimer);
+      pollTimer = setInterval(async () => {
+        try {
+          const res = await fetch('/status?id=' + encodeURIComponent(sessionId));
+          if (!res.ok) {
+            clearInterval(pollTimer);
+            activeStatusBadgeEl.textContent = 'stopped / not found';
+            return;
+          }
+          const data = await res.json();
+          setBadge(activeStatusBadgeEl, data.status);
+
+          if (data.qrDataUrl && data.status !== 'connected') {
+            qrContainer.classList.remove('hidden');
+            qrImg.src = data.qrDataUrl;
+          } else {
+            qrContainer.classList.add('hidden');
+          }
+
+          if (data.pairingCode && data.status !== 'connected') {
+            codeContainer.classList.remove('hidden');
+            pairingCodeText.textContent = data.pairingCode;
+          } else {
+            codeContainer.classList.add('hidden');
+          }
+
+          if (data.status === 'connected') {
+            clearInterval(pollTimer);
+            qrContainer.classList.add('hidden');
+            codeContainer.classList.add('hidden');
+          }
+        } catch (e) {
+          console.error(e);
+        }
+      }, 2500);
+    }
+
+    connectBtn.addEventListener('click', async () => {
+      userErrorText.textContent = '';
+      const phoneNumber = document.getElementById('phoneInput').value.trim();
+      const label = document.getElementById('ownerLabel').value.trim();
+      const mode = document.getElementById('connectMode').value;
+
+      connectBtn.disabled = true;
+      connectBtn.textContent = 'Connecting...';
+
+      try {
+        const res = await fetch('/connect', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phoneNumber, label, mode })
+        });
+        const data = await res.json();
+
+        if (!res.ok) {
+          userErrorText.textContent = data.error || 'Connect fail hua.';
+          return;
+        }
+
+        userStatusBox.classList.remove('hidden');
+        activeSessionIdEl.textContent = data.id;
+        setBadge(activeStatusBadgeEl, data.status);
+
+        if (data.qrDataUrl) {
+          qrContainer.classList.remove('hidden');
+          qrImg.src = data.qrDataUrl;
+        } else {
+          qrContainer.classList.add('hidden');
+        }
+
+        if (data.pairingCode) {
+          codeContainer.classList.remove('hidden');
+          pairingCodeText.textContent = data.pairingCode;
+        } else {
+          codeContainer.classList.add('hidden');
+        }
+
+        pollSessionStatus(data.id);
+      } catch (e) {
+        userErrorText.textContent = 'Network error: ' + e.message;
+      } finally {
+        connectBtn.disabled = false;
+        connectBtn.textContent = 'Connect Karein';
+      }
+    });
+
+    // ADMIN LOGIC
+    const adminKeyInput = document.getElementById('adminKeyInput');
+    const adminLoginBtn = document.getElementById('adminLoginBtn');
+    const refreshAdminBtn = document.getElementById('refreshAdminBtn');
+    const adminLoginError = document.getElementById('adminLoginError');
+    const adminPanel = document.getElementById('adminPanel');
+    const totalRunningCount = document.getElementById('totalRunningCount');
+    const adminSessionsBody = document.getElementById('adminSessionsBody');
+
+    async function loadAdminSessions() {
+      if (!savedAdminKey) return;
+      try {
+        const res = await fetch('/api/admin/sessions', {
+          headers: { 'x-admin-key': savedAdminKey }
+        });
+        const data = await res.json();
+
+        if (!res.ok) {
+          adminPanel.classList.add('hidden');
+          adminLoginError.textContent = data.error || 'Galat Admin Key!';
+          savedAdminKey = '';
+          return;
+        }
+
+        adminLoginError.textContent = '';
+        adminPanel.classList.remove('hidden');
+        totalRunningCount.textContent = data.totalRunning;
+
+        adminSessionsBody.innerHTML = '';
+        if (!data.sessions.length) {
+          adminSessionsBody.innerHTML = '<tr><td colspan="6" class="muted">Abhi koi server/session nahi chal raha hai.</td></tr>';
+          return;
+        }
+
+        for (const s of data.sessions) {
+          const tr = document.createElement('tr');
+          tr.innerHTML = `
+            <td>${escapeHtml(s.ownerLabel || '-')}</td>
+            <td>${escapeHtml(s.phoneNumber || '-')}</td>
+            <td><code>${escapeHtml(s.id)}</code></td>
+            <td><span class="badge ${escapeHtml(s.status)}">${escapeHtml(s.status)}</span></td>
+            <td class="muted">${new Date(s.startedAt).toLocaleTimeString()}</td>
+            <td><button class="danger" data-stop-id="${escapeHtml(s.id)}">Stop</button></td>
+          `;
+          adminSessionsBody.appendChild(tr);
+        }
+
+        adminSessionsBody.querySelectorAll('button[data-stop-id]').forEach((btn) => {
+          btn.addEventListener('click', async () => {
+            const targetId = btn.getAttribute('data-stop-id');
+            btn.disabled = true;
+            btn.textContent = 'Stopping...';
+            try {
+              const stopRes = await fetch('/api/admin/stop', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'x-admin-key': savedAdminKey
+                },
+                body: JSON.stringify({ id: targetId, removeAuth: true })
+              });
+              if (stopRes.ok) {
+                await loadAdminSessions();
+              } else {
+                const errData = await stopRes.json();
+                alert(errData.error || 'Stop nahi ho paya');
+              }
+            } finally {
+              btn.disabled = false;
+              btn.textContent = 'Stop';
+            }
+          });
+        });
+      } catch (e) {
+        adminLoginError.textContent = 'Error: ' + e.message;
+      }
+    }
+
+    function escapeHtml(str) {
+      return String(str).replace(/[&<>"']/g, (m) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      }[m]));
+    }
+
+    adminLoginBtn.addEventListener('click', async () => {
+      savedAdminKey = adminKeyInput.value.trim();
+      await loadAdminSessions();
+      if (adminPollTimer) clearInterval(adminPollTimer);
+      adminPollTimer = setInterval(loadAdminSessions, 4000);
+    });
+
+    refreshAdminBtn.addEventListener('click', loadAdminSessions);
+  </script>
+</body>
+  </html>
