@@ -1,0 +1,14 @@
+{
+  "name": "wa-session-loader-server",
+  "version": "1.0.0",
+  "description": "WhatsApp session and loader server with admin auth, QR/pairing, and password-locked loaders",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.7.16",
+    "express": "^4.21.2",
+    "qrcode": "^1.5.4"
+  }
+}
